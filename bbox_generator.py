@@ -1,14 +1,21 @@
-import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
+import os
+import sys
 import pandas as pd
+import numpy as np
 from PIL import Image
+
 from astropy.io import fits
-from skimage.color import label2rgb
-from skimage.filters import gaussian
+from skimage.io import imread
+
+from skimage import data
 from skimage.filters import threshold_otsu
-from skimage.measure import label, regionprops
-from skimage.morphology import closing, disk
 from skimage.segmentation import clear_border
+from skimage.measure import label, regionprops, regionprops_table
+from skimage.morphology import closing, square, disk, diamond, star
+from skimage.color import label2rgb
+
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 
 def open_fits_image(image_path, image_data_header_location):
@@ -31,24 +38,20 @@ def crop_image(sunspot, image):
     return cropped_image
 
 
-def generate_YOLO_annotations(image, structuring_element=disk(2), cutoff_area=9, noise_reduction=2.8):
+def generate_YOLO_annotations(image, structuring_element=disk(2), cutoff_area=9):
     """
     Uses an automatic threshold to segment input image and draw
     bounding boxes around isolated regions. Outputs in YOLO bounding
     box annotation files (.txt) where each row has the following:
-    
+
     class x_center y_center width height
 
     separated by spaces.
     """
-
-    # blur image to reduce noise
-    image_blurred = gaussian(image, sigma=noise_reduction)
-
-    # apply Otsu's method for thresholding on the blurred image
-    thresh = threshold_otsu(image_blurred[image_blurred > 0])
-    bw = closing(image_blurred < thresh, structuring_element)
-    plt.imshow(bw)
+    # apply Otsu's method for thresholding
+    # exclude zero values (they lie off the disk)
+    thresh = threshold_otsu(image[image != 0])
+    bw = closing(image < thresh, structuring_element)
 
     # remove artifacts connected to image border
     cleared = clear_border(bw)
@@ -56,12 +59,9 @@ def generate_YOLO_annotations(image, structuring_element=disk(2), cutoff_area=9,
     # label image regions
     label_image = label(cleared)
 
-    # print label_image here
-    # plt.imshow(label_image)
-
     # to make the background transparent, pass the value of `bg_label`,
     # and leave `bg_color` as `None` and `kind` as `overlay`
-    label2rgb(label_image, image=image, bg_label=0)
+    image_label_overlay = label2rgb(label_image, image=image, bg_label=0)
 
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.imshow(image, cmap='gray')
@@ -93,8 +93,8 @@ def generate_YOLO_annotations(image, structuring_element=disk(2), cutoff_area=9,
             # calculate bbox measurements
             width = maxc - minc
             height = maxr - minr
-            x_center = minc + width / 2
-            y_center = minr + height / 2
+            x_center = minc + (width) / 2
+            y_center = minr + (height) / 2
 
             # normalize to image shape
             image_height, image_width = image.shape
