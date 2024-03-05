@@ -120,7 +120,6 @@ def generate_YOLO_annotations(image, structuring_element=disk(2), cutoff_area=9)
 
 
 def generate_sunspot_annotations_and_draw(image, structuring_element=disk(2), cutoff_area=9, area_threshold=60):
-
     # Apply Otsu's threshold excluding zero values
     thresh = threshold_otsu(image[image != 0])
     bw = closing(image < thresh, structuring_element)
@@ -135,7 +134,6 @@ def generate_sunspot_annotations_and_draw(image, structuring_element=disk(2), cu
     ax.imshow(image, cmap='gray')
 
     annotations = []
-    class_list = []
     individual_annotations = []
 
     for region in regionprops(label_image, intensity_image=image):
@@ -148,10 +146,10 @@ def generate_sunspot_annotations_and_draw(image, structuring_element=disk(2), cu
 
             if region.area <= area_threshold:
                 edgecolor = 'red'
-                class_list.append(0)  # pore
+                classes = "pore"  # pore
             else:
                 edgecolor = 'purple'
-                class_list.append(1)  # sunspot
+                classes = "sunspot"  # sunspot
 
             rect = mpatches.Rectangle((minc, minr), width, height, fill=False, edgecolor=edgecolor, linewidth=1)
             ax.add_patch(rect)
@@ -173,7 +171,7 @@ def generate_sunspot_annotations_and_draw(image, structuring_element=disk(2), cu
             })
 
             individual_annotations.append({
-                'class': class_list,
+                'class': classes,
                 'x_center': x_center,
                 'y_center': y_center,
                 'width': width,
@@ -190,16 +188,15 @@ def generate_sunspot_annotations_and_draw(image, structuring_element=disk(2), cu
     return annotations_df, annotations_individual_df
 
 
-
 def main():
     img_name = './fits-images/20150508/hmi.in_45s.20150508_000000_TAI.2.continuum.fits'
     base_image = open_fits_image(img_name, 0)
 
     crops_dict = {
-        'x': [702],
-        'y': [1464],
-        'width': [160],
-        'height': [160],
+        'x': [3151],
+        'y': [1220],
+        'width': [640],
+        'height': [640],
     }
     crops_df = pd.DataFrame(crops_dict)
 
@@ -235,6 +232,7 @@ def main():
     combined_annotations_df.to_csv(combined_annotations_csv_file, index=False)
 
     print(f"All annotations saved to '{combined_annotations_csv_file}'.")
+
 
 if __name__ == '__main__':
     main()
