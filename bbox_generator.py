@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import numpy as np
+from skimage._shared.filters import gaussian
 from skimage.color import label2rgb
 from skimage.measure import label, regionprops
 from skimage.morphology import closing, disk
@@ -118,21 +119,26 @@ def generate_YOLO_annotations(image, structuring_element=disk(2), cutoff_area=9)
     return annotations_df
 
 
-def generate_sunspot_annotations(image, structuring_element=disk(2), cutoff_area=9):
-    # Threshold the image, excluding zero values
-    thresh = threshold_otsu(image[image > 0])
+def generate_sunspot_annotations_and_draw(image, structuring_element=disk(2), cutoff_area=9, area_threshold=60):
+
+    # Apply Otsu's threshold excluding zero values
+    thresh = threshold_otsu(image[image != 0])
     bw = closing(image < thresh, structuring_element)
 
-    # Remove artifacts connected to the image border
+    # Remove artifacts connected to image border
     cleared = clear_border(bw)
 
     # Label image regions
     label_image = label(cleared)
 
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.imshow(image, cmap='gray')
+
     annotations = []
+    class_list = []
+    individual_annotations = []
 
     for region in regionprops(label_image, intensity_image=image):
-        # Filter out small regions
         if region.area >= cutoff_area:
             minr, minc, maxr, maxc = region.bbox
             width = maxc - minc
@@ -140,28 +146,49 @@ def generate_sunspot_annotations(image, structuring_element=disk(2), cutoff_area
             x_center = minc + width / 2
             y_center = minr + height / 2
 
-            # Calculate detailed metrics
-            x_centroid, y_centroid = region.centroid
-            area = region.area
-            centroid_intensity = image[int(y_centroid), int(x_centroid)]
-            average_intensity = region.mean_intensity
-            min_intensity = region.min_intensity
-            max_intensity = region.max_intensity
+            if region.area <= area_threshold:
+                edgecolor = 'red'
+                class_list.append(0)  # pore
+            else:
+                edgecolor = 'purple'
+                class_list.append(1)  # sunspot
 
-            annotations.append([
-                x_center, y_center, width, height, minc, minr,
-                x_centroid, y_centroid, area, centroid_intensity,
-                average_intensity, min_intensity, max_intensity
-            ])
+            rect = mpatches.Rectangle((minc, minr), width, height, fill=False, edgecolor=edgecolor, linewidth=1)
+            ax.add_patch(rect)
 
-    # Convert annotations to DataFrame
-    annotations_df = pd.DataFrame(annotations, columns=[
-        'x_center', 'y_center', 'width', 'height', 'x', 'y',
-        'x_centroid', 'y_centroid', 'area', 'centroid_intensity',
-        'average_intensity', 'min_intensity', 'max_intensity'
-    ])
+            annotations.append({
+                'x_center': x_center,
+                'y_center': y_center,
+                'width': width,
+                'height': height,
+                'x': minc,
+                'y': minr,
+                'x_centroid': region.centroid[1],
+                'y_centroid': region.centroid[0],
+                'area': region.area,
+                'centroid_intensity': image[int(region.centroid[0]), int(region.centroid[1])],
+                'average_intensity': region.mean_intensity,
+                'min_intensity': region.min_intensity,
+                'max_intensity': region.max_intensity,
+            })
 
-    return annotations_df
+            individual_annotations.append({
+                'class': class_list,
+                'x_center': x_center,
+                'y_center': y_center,
+                'width': width,
+                'height': height,
+            })
+    annotations_df = pd.DataFrame(annotations)
+
+    annotations_individual_df = pd.DataFrame(individual_annotations)
+
+    ax.set_axis_off()
+    plt.tight_layout()
+    plt.show()
+
+    return annotations_df, annotations_individual_df
+
 
 
 def main():
@@ -169,40 +196,45 @@ def main():
     base_image = open_fits_image(img_name, 0)
 
     crops_dict = {
-        'x': [0, 1881, 3173, 3443, 1952, 2816],
-        'y': [0, 1489, 1247, 2099, 2357, 1376],
-        'width': [4096, 640, 640, 640, 320, 1280],
-        'height': [4096, 640, 640, 640, 320, 1280],
+        'x': [702],
+        'y': [1464],
+        'width': [160],
+        'height': [160],
     }
     crops_df = pd.DataFrame(crops_dict)
 
     out_dir = './training_crops/'
+    out_dir_base = './'
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
     timestamp = img_name.split('.')[-4].replace('TAI', '')
 
-    all_annotations = []  # List to store annotations from all crops
+    all_annotations = []
 
-    for i, crop_info in crops_df.iterrows():
-        crop = crop_image(crop_info, base_image)
-        annotations_df = generate_sunspot_annotations(crop, disk(2), 9)
-        annotations_df['crop_index'] = i  # Add crop index to distinguish between different crops
+    for i in range(len(crops_df)):
+        crop = crop_image(crops_df.iloc[i], base_image)
+        annotations_df, class_annotations_df = generate_sunspot_annotations_and_draw(crop, disk(2), 9)
+        annotations_df['crop_index'] = i  # Adding crop index to distinguish between different crops
 
         all_annotations.append(annotations_df)
 
         fname = f"{timestamp}CROP_{i}"
         # Save cropped image
-        cropped_img = Image.fromarray(crop.astype(np.uint8))
-        cropped_img.save(os.path.join(out_dir, f"{fname}.png"))
+        cropped_img = Image.fromarray(crop)
+        cropped_img_file = os.path.join(out_dir, f"{fname}.png")
+        cropped_img.save(cropped_img_file)
 
-    # Combine all annotations into a single DataFrame
+        # Save class annotations to a TXT file
+        class_annotations_txt_file = os.path.join(out_dir, f"{fname}_annotations.txt")
+        class_annotations_df.to_csv(class_annotations_txt_file, sep=' ', index=False, header=False)
+
+    # Combine all detailed annotations into a single DataFrame and save
     combined_annotations_df = pd.concat(all_annotations, ignore_index=True)
-    # Save combined annotations to a single CSV file
-    combined_annotations_df.to_csv(os.path.join(out_dir, f"{timestamp}_all_annotations.csv"), index=False)
+    combined_annotations_csv_file = os.path.join(out_dir_base, f"{timestamp}_all_annotations.csv")
+    combined_annotations_df.to_csv(combined_annotations_csv_file, index=False)
 
-    print(f"All annotations saved to '{timestamp}_all_annotations.csv'.")
-
+    print(f"All annotations saved to '{combined_annotations_csv_file}'.")
 
 if __name__ == '__main__':
     main()
