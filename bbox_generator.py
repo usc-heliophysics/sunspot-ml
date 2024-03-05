@@ -163,14 +163,13 @@ def generate_sunspot_annotations_and_draw(image, structuring_element=disk(2), cu
                 'height': height,
                 'x': minc,
                 'y': minr,
-                'x_centroid': region.centroid[1],  # Corrected centroid x-coordinate
-                'y_centroid': region.centroid[0],  # Corrected centroid y-coordinate
+                'x_centroid': region.centroid[1],
+                'y_centroid': region.centroid[0],
                 'area': region.area,
                 'centroid_intensity': image[int(region.centroid[0]), int(region.centroid[1])],
                 'average_intensity': region.mean_intensity,
                 'min_intensity': region.min_intensity,
                 'max_intensity': region.max_intensity,
-                'class': class_list[-1]  # Append class based on area
             })
 
             individual_annotations.append({
@@ -180,19 +179,9 @@ def generate_sunspot_annotations_and_draw(image, structuring_element=disk(2), cu
                 'width': width,
                 'height': height,
             })
-
-    # Convert annotations to DataFrame
     annotations_df = pd.DataFrame(annotations)
 
-    # Aggregate class list and other metrics if needed
     annotations_individual_df = pd.DataFrame(individual_annotations)
-
-    # Save annotations to CSV files
-    annotations_df.to_csv('./training_crops/sunspot_detailed_annotations.csv', index=False)
-    annotations_individual_df.to_csv('./training_crops/sunspot_class_annotations.csv', index=False)
-
-    print("Detailed annotations saved to 'sunspot_detailed_annotations.csv'.")
-    print("Class annotations saved to 'sunspot_class_annotations.csv'.")
 
     ax.set_axis_off()
     plt.tight_layout()
@@ -215,33 +204,37 @@ def main():
     crops_df = pd.DataFrame(crops_dict)
 
     out_dir = './training_crops/'
+    out_dir_base = './'
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
     timestamp = img_name.split('.')[-4].replace('TAI', '')
 
-    all_annotations = []  # List to store annotations from all crops
+    all_annotations = []
 
     for i in range(len(crops_df)):
         crop = crop_image(crops_df.iloc[i], base_image)
-        annotations_df, annotations_individual_df = generate_sunspot_annotations_and_draw(crop, disk(2), 9)
-        #annotations_df = generate_YOLO_annotations(crop, disk(2), 9)
-        annotations_df['crop_index'] = i  # Add crop index to distinguish between different crops
+        annotations_df, class_annotations_df = generate_sunspot_annotations_and_draw(crop, disk(2), 9)
+        annotations_df['crop_index'] = i  # Adding crop index to distinguish between different crops
 
         all_annotations.append(annotations_df)
 
         fname = f"{timestamp}CROP_{i}"
         # Save cropped image
         cropped_img = Image.fromarray(crop)
-        cropped_img.save(os.path.join(out_dir, f"{fname}.png"))
+        cropped_img_file = os.path.join(out_dir, f"{fname}.png")
+        cropped_img.save(cropped_img_file)
 
-    # Combine all annotations into a single DataFrame
+        # Save class annotations to a TXT file
+        class_annotations_txt_file = os.path.join(out_dir, f"{fname}_annotations.txt")
+        class_annotations_df.to_csv(class_annotations_txt_file, sep=' ', index=False, header=False)
+
+    # Combine all detailed annotations into a single DataFrame and save
     combined_annotations_df = pd.concat(all_annotations, ignore_index=True)
-    # Save combined annotations to a single CSV file
-    combined_annotations_df.to_csv(os.path.join(out_dir, f"{timestamp}_all_annotations.csv"), index=False)
+    combined_annotations_csv_file = os.path.join(out_dir_base, f"{timestamp}_all_annotations.csv")
+    combined_annotations_df.to_csv(combined_annotations_csv_file, index=False)
 
-    print(f"All annotations saved to '{timestamp}_all_annotations.csv'.")
-
+    print(f"All annotations saved to '{combined_annotations_csv_file}'.")
 
 if __name__ == '__main__':
     main()
