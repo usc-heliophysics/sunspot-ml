@@ -189,7 +189,7 @@ def generate_sunspot_annotations_and_draw(image, structuring_element=disk(2), cu
 
 
 def main():
-    img_name = './fits-images/20150508/hmi.in_45s.20150508_000000_TAI.2.continuum.fits'
+    img_name = './fits-images/20150508/input.fits'
     base_image = open_fits_image(img_name, 0)
 
     crops_dict = {
