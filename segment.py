@@ -55,7 +55,7 @@ def upscale_image(input_path, output_path, scale_factor=4):
         print("Error during upscaling:", e.stderr)
 
 
-def thresh_by_tile(base_image, tile_size=512, ):
+def thresh_by_tile(base_image, tile_size=512):
     # split image into square tiles of length tile_size
     base_size = base_image.shape[0]  # assuming image is square
     divs = base_size // tile_size
@@ -117,24 +117,29 @@ def find_objects(image):
 
 def main(image_path, scale_factor=4, tile_size=2048):
     # read image
-    base_image_path = 'upscaled_image.png'
-    upscale_image(image_path, base_image_path, scale_factor)
+    # base_image_path = 'upscaled_image.png'
+    # upscale_image(image_path, base_image_path, scale_factor)
     base_image = read_image("upscaled_image.png")
+    # base_image = read_image(image_path)
     # treshold it by tiling. play around with the tile size
+    print(f"Thresholding {base_image.shape[0]}x{base_image.shape[1]} image with tile size {tile_size}...")
     thresholded = thresh_by_tile(base_image, tile_size=tile_size)
 
     # label image
+    print("Labeling...")
     label_image = find_objects(thresholded)
-    print(type(label_image))
-    print(label_image.shape)
+    print(f"Found {label_image.max()} objects in image.")
 
     # GET FOLLOWING REGION PROPERTIES FROM THESE LABELS: bounding box, area, centroid coords, centroid pixel
     #  intensity, minimum intensity, coords of min intensity pixel, average intensity
+    print("Getting region properties...")
     props = measure.regionprops(label_image, intensity_image=base_image)
-    with open('output/region_properties.txt', 'w') as file:
+    print("Writing properties to file...")
+    with open('output/region_properties.csv', 'w') as file:
         file.write(
-            "Label, Bounding Box, Area, Centroid Coordinates, Centroid Intensity, Minimum Intensity, Coordinates of "
-            "Min Intensity Pixel, Average Intensity\n")
+            "Label, BBox Min Row, BBox Min Col, BBox Max Row, BBox Max Col, Area, Centroid Row, Centroid Col, "
+            "Centroid Intensity, Minimum Intensity, Minimum Intensity Row, Minimum Intensity Col, Average Intensity\n"
+        )
         for region in props:
             # Adjust bounding box and centroid by scale factor
             bbox = tuple([int(b / scale_factor) for b in region.bbox])
@@ -149,23 +154,30 @@ def main(image_path, scale_factor=4, tile_size=2048):
             min_intensity_coords = tuple([int(mc / scale_factor) for mc in min_intensity_coords])
 
             # Format the data as a string to write to the file
-            region_data = f"{region.label}, {bbox}, {area}, {centroid}, {centroid_intensity}, {min_intensity}, {min_intensity_coords}, {region.mean_intensity}\n"
+            region_data = (
+                f"{region.label}, {bbox[0]}, {bbox[1]}, {bbox[2]}, {bbox[3]}, {area}, {centroid[0]}, {centroid[1]}, "
+                f"{centroid_intensity}, {min_intensity}, {min_intensity_coords[0]}, {min_intensity_coords[1]}, "
+                f"{region.mean_intensity}\n"
+            )
             file.write(region_data)
-    # rescale image to 8-bit dtype so it can be overlaid with labels
+
+    # rescale image intensity to 8-bit dtype so it can be overlaid with labels
     rescaled_image = ski.exposure.rescale_intensity(base_image)
     base_as_ubyte = ski.util.img_as_ubyte(rescaled_image)
+    print("Plotting features on base image...")
     image_label_overlay = ski.color.label2rgb(label_image, image=base_as_ubyte)
-    print(type(image_label_overlay))
-    print(image_label_overlay.shape)
+
 
     # output images from each step
+    print("Saving thresholded image...")
     ski.io.imsave('output/thresholded.png', ski.util.img_as_ubyte(thresholded))
-    print("saved thresholded image")
+    print("Saving labeled image...")
     ski.io.imsave('output/labeled.png', ski.util.img_as_ubyte(image_label_overlay))
-    print("saved labeled image")
+    print("Done!")
     # remove upscaled image
-    os.remove(base_image_path)
+    # os.remove(base_image_path)
 
 
 if __name__ == '__main__':
-    main("./test_res/input.jpg")
+    main("./test_res/input.jpg", scale_factor=2)
+    # main("/home/jswen/dev/solar-yolo/data/fits_images/20150508/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", scale_factor=1, tile_size=512)
