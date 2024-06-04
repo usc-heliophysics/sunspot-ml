@@ -43,7 +43,8 @@ def read_image(img_name):
         return cv2.imread(img_name, cv2.IMREAD_GRAYSCALE)
 
 
-# upscales image using Real-ESRGAN: https://github.com/xinntao/Real-ESRGAN
+# Upscale image using Real-ESRGAN: https://github.com/xinntao/Real-ESRGAN
+# Default scale factor is 4
 def upscale_image(input_path, output_path, scale_factor=4):
     command = [
         './realesrgan-ncnn-vulkan',
@@ -131,11 +132,18 @@ def find_objects(image):
 
 
 def main(image_path, scale_factor=4, tile_size=2048):
-    # read image
-    # base_image_path = 'upscaled_image.png'
-    # upscale_image(image_path, base_image_path, scale_factor)
-    base_image = read_image("upscaled_image.png")
-    # base_image = read_image(image_path)
+    # read image and upscale if necessary
+    if scale_factor > 1:
+        try:
+            base_image_path = 'upscaled_image.png'
+            upscale_image(image_path, base_image_path, scale_factor)
+            base_image = read_image("upscaled_image.png")
+        except Exception as e:
+            print(f"Error upscaling image: {e}")
+            base_image = read_image(image_path)
+    else:
+        base_image = read_image(image_path)
+
     # treshold it by tiling. play around with the tile size
     print(f"Thresholding {base_image.shape[0]}x{base_image.shape[1]} image with tile size {tile_size}...")
     thresholded = thresh_by_tile(base_image, tile_size=tile_size)
@@ -146,8 +154,10 @@ def main(image_path, scale_factor=4, tile_size=2048):
     # TODO: Filter out objects on the disk edge
     print(f"Found {label_image.max()} objects in image.")
 
-    # GET FOLLOWING REGION PROPERTIES FROM THESE LABELS: bounding box, area, centroid coords, centroid pixel
-    #  intensity, minimum intensity, coords of min intensity pixel, average intensity
+    # GET FOLLOWING REGION PROPERTIES FROM THESE LABELS
+    '''bounding box, area, centroid coords, centroid pixel, intensity, minimum intensity, coords of min intensity 
+    pixel, average intensity'''
+
     print("Getting region properties...")
     props = measure.regionprops(label_image, intensity_image=base_image)
     print("Writing properties to file...")
@@ -190,6 +200,7 @@ def main(image_path, scale_factor=4, tile_size=2048):
     print("Saving labeled image...")
     ski.io.imsave('output/labeled.png', ski.util.img_as_ubyte(image_label_overlay))
     print("Done!")
+
     # remove upscaled image
     # os.remove(base_image_path)
 
