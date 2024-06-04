@@ -10,6 +10,7 @@ from skimage import measure
 Image.MAX_IMAGE_PIXELS = None
 
 
+# reads a FITS file as an image array
 def open_fits_image(image_path, image_data_header_location):
     print(f"Reading {image_path}")
     image_file = open(image_path, "rb")
@@ -19,6 +20,7 @@ def open_fits_image(image_path, image_data_header_location):
     return image_data
 
 
+# splits a given square image into a collection of square tiles
 def reshape_split(image: np.ndarray, kernel_size: int):
     img_height, img_width = image.shape
     tile_height = tile_width = kernel_size  # tile must be square
@@ -31,14 +33,17 @@ def reshape_split(image: np.ndarray, kernel_size: int):
     return tiled_array
 
 
+# reads the given image into an array
 def read_image(img_name):
-    print("Attempting to read image with skimage...")
-    if img_name.split('.')[-1] == 'fits':
+    print("Attempting to read image...")
+    img_ext = img_name.split(".")[-1]
+    if img_ext == 'fits':
         return open_fits_image(img_name, 0)
     else:
         return cv2.imread(img_name, cv2.IMREAD_GRAYSCALE)
 
-# Upscale image using Real-ESRGAN
+
+# Upscale image using Real-ESRGAN: https://github.com/xinntao/Real-ESRGAN
 # Default scale factor is 4
 def upscale_image(input_path, output_path, scale_factor=4):
     command = [
@@ -56,6 +61,7 @@ def upscale_image(input_path, output_path, scale_factor=4):
         print("Error during upscaling:", e.stderr)
 
 
+# splits a given image into tiles, then applies Otsu's thresholding method
 def thresh_by_tile(base_image, tile_size=512):
     # split image into square tiles of length tile_size
     base_size = base_image.shape[0]  # assuming image is square
@@ -111,6 +117,15 @@ def find_objects(image):
     # remove artifacts connected to image border
     cleared = ski.segmentation.clear_border(opened, bgval=0)
 
+    # remove artifacts on disk edge
+    nrows, ncols = cleared.shape
+    row, col = np.ogrid[:nrows, :ncols]
+    cnt_row, cnt_col = nrows / 2, ncols / 2
+    # mask out pixels that lie outside of a disk with radius 91% of img size
+    outer_disk_mask = ((row - cnt_row)**2 + (col - cnt_col)**2 >
+                    (nrows / 2 * 0.91)**2)
+    cleared[outer_disk_mask] = 0
+
     # label image regions
     labeled = ski.measure.label(cleared)
     return labeled
@@ -136,6 +151,7 @@ def main(image_path, scale_factor=4, tile_size=2048):
     # label image
     print("Labeling...")
     label_image = find_objects(thresholded)
+    # TODO: Filter out objects on the disk edge
     print(f"Found {label_image.max()} objects in image.")
 
     # GET FOLLOWING REGION PROPERTIES FROM THESE LABELS
