@@ -202,5 +202,5 @@ def main(image_path, fits_path, scale_factor=4, tile_size=2048):
 
 
 if __name__ == '__main__':
-    main("./test_res/input.jpg", "./test_res/input.fits", scale_factor=2)
+    main("test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits.jpg", "test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", scale_factor=2)
     # main("/home/jswen/dev/solar-yolo/data/fits_images/20150508/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", scale_factor=1, tile_size=512)
