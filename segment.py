@@ -163,8 +163,8 @@ def main(image_path, scale_factor=4, tile_size=2048):
     print("Writing properties to file...")
     with open('output/region_properties.csv', 'w') as file:
         file.write(
-            "Label, BBox Min Row, BBox Min Col, BBox Max Row, BBox Max Col, Area, Centroid Row, Centroid Col, "
-            "Centroid Intensity, Minimum Intensity, Minimum Intensity Row, Minimum Intensity Col, Average Intensity\n"
+            "Region Label, BBox Min Y, BBox Min X, BBox Max Y, BBox Max X, Area, Centroid Y, Centroid X, "
+            "Centroid Intensity, Min Intensity, Min Intensity Y, Min Intensity X, Avg Intensity\n"
         )
         for region in props:
             # Adjust bounding box and centroid by scale factor
