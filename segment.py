@@ -208,4 +208,6 @@ def main(image_path, scale_factor=4, tile_size=2048):
 if __name__ == '__main__':
     # main("./test_res/input.jpg", scale_factor=4)
     # main("/home/jswen/dev/solar-yolo/data/fits_images/20150508/hmi.in_45s.20150508_000000_TAI.2.continuum.fits.png", scale_factor=4, tile_size=2048)
+    
+    # pre-upscaled image
     main("upscaled_image.png", scale_factor=1)
