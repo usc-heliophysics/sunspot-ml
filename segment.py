@@ -116,7 +116,7 @@ def find_objects(image):
     return labeled
 
 
-def main(image_path, scale_factor=4, tile_size=2048):
+def main(image_path, fits_path, scale_factor=4, tile_size=2048):
     # read image and upscale if necessary
     if scale_factor > 1:
         try:
@@ -128,6 +128,9 @@ def main(image_path, scale_factor=4, tile_size=2048):
             base_image = read_image(image_path)
     else:
         base_image = read_image(image_path)
+
+    # read fits image
+    fits_image = open_fits_image(fits_path, 0)
 
     # treshold it by tiling. play around with the tile size
     print(f"Thresholding {base_image.shape[0]}x{base_image.shape[1]} image with tile size {tile_size}...")
@@ -156,18 +159,27 @@ def main(image_path, scale_factor=4, tile_size=2048):
             centroid = tuple([int(c / scale_factor) for c in region.centroid])
             area = int(region.area / (scale_factor ** 2))  # Area scales with the square of the scale factor
 
-            # Get intensity data without scaling adjustments
-            centroid_intensity = base_image[int(centroid[0]), int(centroid[1])]
-            min_intensity = region.min_intensity
-            min_intensity_index = region.intensity_image.argmin()
-            min_intensity_coords = np.unravel_index(min_intensity_index, region.intensity_image.shape)
-            min_intensity_coords = tuple([int(mc / scale_factor) for mc in min_intensity_coords])
+            # Get intensity data directly from the fits_image using adjusted coordinates
+            centroid_intensity = fits_image[centroid]
+
+            # To find the minimum intensity and its coordinates in the fits_image using the region's bbox
+            x_min, y_min, x_max, y_max = bbox
+            region_slice = fits_image[x_min:x_max + 1, y_min:y_max + 1]
+
+            min_intensity = np.min(region_slice)
+            min_intensity_index = np.argmin(region_slice)
+            min_intensity_coords = np.unravel_index(min_intensity_index, region_slice.shape)
+
+            # Convert local coordinates of the minimum to global coordinates
+            min_intensity_coords = (min_intensity_coords[0] + x_min, min_intensity_coords[1] + y_min)
+
+            mean_intensity = np.mean(region_slice)
 
             # Format the data as a string to write to the file
             region_data = (
                 f"{region.label}, {bbox[0]}, {bbox[1]}, {bbox[2]}, {bbox[3]}, {area}, {centroid[0]}, {centroid[1]}, "
                 f"{centroid_intensity}, {min_intensity}, {min_intensity_coords[0]}, {min_intensity_coords[1]}, "
-                f"{region.mean_intensity}\n"
+                f"{mean_intensity}\n"
             )
             file.write(region_data)
 
@@ -190,5 +202,5 @@ def main(image_path, scale_factor=4, tile_size=2048):
 
 
 if __name__ == '__main__':
-    main("./test_res/input.jpg", scale_factor=2)
+    main("./test_res/input.jpg", "./test_res/input.fits", scale_factor=2)
     # main("/home/jswen/dev/solar-yolo/data/fits_images/20150508/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", scale_factor=1, tile_size=512)
