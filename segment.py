@@ -116,13 +116,22 @@ def find_objects(image):
     return labeled
 
 
-def main(image_path, fits_path, scale_factor=4, tile_size=2048):
+def segment_core(image_path, fits_path, scale_factor=4, tile_size=2048):
+    # check if file exists
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Image file {image_path} not found.")
+    if not os.path.exists(fits_path):
+        raise FileNotFoundError(f"FITS file {fits_path} not found.")
+
+    #extract the date from the image path
+    date = image_path.split('/')[-1].split('.')[2]
+
     # read image and upscale if necessary
     if scale_factor > 1:
         try:
-            base_image_path = 'upscaled_image.png'
+            base_image_path = 'upx' + str(scale_factor) + '_' + date + '_.png'
             upscale_image(image_path, base_image_path, scale_factor)
-            base_image = read_image("upscaled_image.png")
+            base_image = read_image(base_image_path)
         except Exception as e:
             print(f"Error upscaling image: {e}")
             base_image = read_image(image_path)
@@ -148,7 +157,7 @@ def main(image_path, fits_path, scale_factor=4, tile_size=2048):
     print("Getting region properties...")
     props = measure.regionprops(label_image, intensity_image=base_image)
     print("Writing properties to file...")
-    with open('output/region_properties.csv', 'w') as file:
+    with open('output/region_properties_' + date + '_.csv', 'w') as file:
         file.write(
             "Label, BBox Min Row, BBox Min Col, BBox Max Row, BBox Max Col, Area, Centroid Row, Centroid Col, "
             "Centroid Intensity, Minimum Intensity, Minimum Intensity Row, Minimum Intensity Col, Average Intensity\n"
@@ -192,9 +201,9 @@ def main(image_path, fits_path, scale_factor=4, tile_size=2048):
 
     # output images from each step
     print("Saving thresholded image...")
-    ski.io.imsave('output/thresholded.png', ski.util.img_as_ubyte(thresholded))
+    ski.io.imsave('output/thresholded_' + date + '_.png', ski.util.img_as_ubyte(thresholded))
     print("Saving labeled image...")
-    ski.io.imsave('output/labeled.png', ski.util.img_as_ubyte(image_label_overlay))
+    ski.io.imsave('output/labeled_' + date + '_.png', ski.util.img_as_ubyte(image_label_overlay))
     print("Done!")
 
     # remove upscaled image
@@ -202,5 +211,5 @@ def main(image_path, fits_path, scale_factor=4, tile_size=2048):
 
 
 if __name__ == '__main__':
-    main("test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits.jpg", "test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", scale_factor=2)
+    segment_core("test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits.png", "test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", scale_factor=2)
     # main("/home/jswen/dev/solar-yolo/data/fits_images/20150508/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", scale_factor=1, tile_size=512)
