@@ -163,7 +163,6 @@ def segment_core(image_path, fits_path, scale_factor=4, tile_size=2048):
     # label image
     print("Labeling...")
     label_image = find_objects(thresholded)
-    # TODO: Filter out objects on the disk edge
     print(f"Found {label_image.max()} objects in image.")
 
     # GET FOLLOWING REGION PROPERTIES FROM THESE LABELS
@@ -227,13 +226,5 @@ def segment_core(image_path, fits_path, scale_factor=4, tile_size=2048):
 
 
 if __name__ == '__main__':
-<<<<<<< HEAD
-    # main("./test_res/input.jpg", scale_factor=4)
-    # main("/home/jswen/dev/solar-yolo/data/fits_images/20150508/hmi.in_45s.20150508_000000_TAI.2.continuum.fits.png", scale_factor=4, tile_size=2048)
-    
-    # pre-upscaled image
-    main("upscaled_image.png", scale_factor=1)
-=======
     segment_core("test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits.png", "test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", scale_factor=2)
     # main("/home/jswen/dev/solar-yolo/data/fits_images/20150508/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", scale_factor=1, tile_size=512)
->>>>>>> c4657dc2dcaa9fb165fdb3abc930703fd1a37c2e
