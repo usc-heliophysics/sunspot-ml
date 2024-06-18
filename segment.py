@@ -1,3 +1,10 @@
+"""
+Core methods used for segmenting sunspots from flattened continuum intensity images of the sun.
+
+Authors: James Wen (jswen@usc.edu) and Sid Qian (sidqian@usc.edu)
+"""
+
+
 import os
 import subprocess
 import numpy as np
@@ -38,7 +45,7 @@ def preprocess(image):
     return image
 
 
-def find_rois(image, num_stdevs=9, padding=60):
+def find_rois(image, num_stdevs=7, padding=50):
     """
     Finds the darkest pixels in an image and isolates the surrounding region of interest. 
 
@@ -185,14 +192,16 @@ def clear_bg(clustered_img, bwidth=10, bg_min_count=50, return_vals=False):
         an array of counts for each value.
 
     """
+    R = clustered_img.flatten()
+    # set highest value to zero. this is to deal with plages surrounding sunspots
+    R[R == R.max()] = 0
     nrows, ncols = clustered_img.shape
     border = np.copy(clustered_img)
     border[bwidth:nrows-bwidth, bwidth:ncols-bwidth] = 0
-    S = clustered_img.flatten()
     unique_vals, counts = np.unique(border, return_counts=True)
     unique_vals = unique_vals[np.where(counts > bg_min_count)]
-    S[np.argwhere(np.in1d(S, unique_vals))] = 0
-    cleared = S.reshape(clustered_img.shape)
+    R[np.argwhere(np.in1d(R, unique_vals))] = 0
+    cleared = R.reshape(clustered_img.shape)
     if return_vals:
         return cleared, (unique_vals, counts)
     else:
@@ -222,15 +231,19 @@ def binarize_features(cleared_img, feature='penumbrae'):
         The binarized image. 
     """
     unique_vals = np.unique(cleared_img)
-    binarized = np.copy(cleared_img)
-    if feature == 'penumbrae':
-        binarized[binarized > 0] = 1
-    elif feature == 'umbrae':
-        binarized[binarized > np.min(unique_vals[np.nonzero(unique_vals)])] = 0
-        binarized[binarized == np.min(unique_vals[np.nonzero(unique_vals)])] = 1
+    nonzero_uniques = unique_vals[np.nonzero(unique_vals)]
+    if nonzero_uniques.any():
+        binarized = np.copy(cleared_img)
+        if feature == 'penumbrae':
+            binarized[binarized > 0] = 1
+        elif feature == 'umbrae':
+            binarized[binarized > np.min(nonzero_uniques)] = 0
+            binarized[binarized == np.min(nonzero_uniques)] = 1
+        else:
+            raise Exception("Detection of this feature is not supported.")
+        return binarized
     else:
-        raise Exception("Detection of this feature is not supported.")
-    return binarized
+        return np.zeros_like(cleared_img)
 
 def segment_core(fits_path, image_path=None, feature="penumbrae"):
     # check if file exists
@@ -240,7 +253,7 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
         raise FileNotFoundError(f"Image file {image_path} not found.")
     
     #extract the date from the fits file path
-    date = fits_path.split('/')[-1].split('.')[2]
+    date, time = fits_path.split('/')[-1].split('.')[2].split('_')[:2]
 
     # read fits image and preprocess
     fits_image = open_fits_image(fits_path, 0)
@@ -259,7 +272,7 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
     segmentation = np.zeros_like(fits_image)
     for loc in locs:
         img = prepped_image[loc]
-        clustered = kmeans(img, K=5, blur_strength=1)
+        clustered = kmeans(img, K=5, blur_strength=5)
         cleared = clear_bg(clustered, bwidth=10, bg_min_count=50)
         binarized = binarize_features(cleared, feature=feature)
         segmentation[loc] = binarized
@@ -275,8 +288,9 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
 
     print("Getting region properties...")
     props = ski.measure.regionprops(label_image, intensity_image=fits_image)
-    print("Writing properties to file...")
-    with open('output/region_properties_' + date + '_.csv', 'w') as file:
+    regionprop_path = f'output/region_properties_{date}_{time}_.csv'
+    print(f"Writing properties to {regionprop_path}...")
+    with open(regionprop_path, 'w') as file:
         file.write(
             "Region Label,BBox Min Y,BBox Min X,BBox Max Y,BBox Max X,Area,Centroid Y,Centroid X,"
             "Centroid Intensity,Min Intensity,Min Intensity Y,Min Intensity X,Avg Intensity\n"
@@ -318,10 +332,13 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
 
 
     # output images from each step
-    print("Saving segmented image...")
-    ski.io.imsave('output/segmented_' + date + '_.png', ski.util.img_as_ubyte(segmentation.astype('bool')), check_contrast=False)
-    print("Saving labeled image...")
-    ski.io.imsave('output/labeled_' + date + '_.png', ski.util.img_as_ubyte(image_label_overlay), check_contrast=False)
+    seg_img_path = f'output/segmented_{date}_{time}_.png'
+    print(f"Saving segmented image as {seg_img_path}...")
+    ski.io.imsave(seg_img_path, ski.util.img_as_ubyte(segmentation.astype('bool')), check_contrast=False)
+
+    label_img_path = f'output/labeled_{date}_{time}_.png'
+    print(f"Saving labeled image as {label_img_path}...")
+    ski.io.imsave(label_img_path, ski.util.img_as_ubyte(image_label_overlay), check_contrast=False)
     print("Done!")
 
     # remove upscaled image
@@ -329,4 +346,4 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
 
 
 if __name__ == '__main__':
-    segment_core("test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", feature='penumbrae')
+    segment_core("test_res/hmi.in_45s.20150512_000000_TAI.2.continuum.fits", feature='penumbrae')
