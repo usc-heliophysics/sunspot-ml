@@ -26,4 +26,4 @@ image_files = [
     "test_res/hmi.in_45s.20150512_220000_TAI.2.continuum"
 ]
 
-process_images(image_files, feature="penumbrae", max_workers=2)
+process_images(image_files, feature="penumbrae")
