@@ -2,7 +2,6 @@ import os
 import subprocess
 import numpy as np
 import skimage as ski
-import cv2
 from PIL.Image import Image
 from astropy.io import fits
 from skimage import measure
@@ -40,7 +39,22 @@ def read_image(img_name):
     if img_ext == 'fits':
         return open_fits_image(img_name, 0)
     else:
-        return cv2.imread(img_name, cv2.IMREAD_GRAYSCALE)
+        return ski.img_as_float(ski.io.imread(img_name, as_gray=True))
+    
+
+# prepare image for thresholding
+def preprocess(image):
+    # replace black & near-black values with mean value of a central tile
+    # this assumes such values only lie outside the disk
+    height, width = image.shape
+    y_mid = height//2
+    x_mid = width//2
+    central_tile = image.copy()
+    ratio = 40 #ratio of full img width to tile width
+    central_tile = central_tile[y_mid-height//ratio:y_mid+height//ratio, x_mid-width//ratio:x_mid+width//ratio]
+    processed = image.copy()
+    processed[np.where(processed < 0.02)] = np.mean(central_tile)
+    return processed
 
 
 # Upscale image using Real-ESRGAN: https://github.com/xinntao/Real-ESRGAN
@@ -156,9 +170,10 @@ def segment_core(image_path, fits_path, scale_factor=4, tile_size=2048):
     # read fits image
     fits_image = open_fits_image(fits_path, 0)
 
-    # treshold it by tiling. play around with the tile size
-    print(f"Thresholding {base_image.shape[0]}x{base_image.shape[1]} image with tile size {tile_size}...")
-    thresholded = thresh_by_tile(base_image, tile_size=tile_size)
+    # threshold it by tiling. play around with the tile size
+    processed_image = preprocess(base_image)
+    print(f"Thresholding {processed_image.shape[0]}x{processed_image.shape[1]} image with tile size {tile_size}...")
+    thresholded = thresh_by_tile(processed_image, tile_size=tile_size)
 
     # label image
     print("Labeling...")
@@ -170,7 +185,7 @@ def segment_core(image_path, fits_path, scale_factor=4, tile_size=2048):
     pixel, average intensity'''
 
     print("Getting region properties...")
-    props = measure.regionprops(label_image, intensity_image=base_image)
+    props = measure.regionprops(label_image, intensity_image=processed_image)
     print("Writing properties to file...")
     with open('output/region_properties_' + date + '_.csv', 'w') as file:
         file.write(
@@ -208,7 +223,7 @@ def segment_core(image_path, fits_path, scale_factor=4, tile_size=2048):
             file.write(region_data)
 
     # rescale image intensity to 8-bit dtype so it can be overlaid with labels
-    rescaled_image = ski.exposure.rescale_intensity(base_image)
+    rescaled_image = ski.exposure.rescale_intensity(processed_image)
     base_as_ubyte = ski.util.img_as_ubyte(rescaled_image)
     print("Plotting features on base image...")
     image_label_overlay = ski.color.label2rgb(label_image, image=base_as_ubyte)
@@ -227,4 +242,4 @@ def segment_core(image_path, fits_path, scale_factor=4, tile_size=2048):
 
 if __name__ == '__main__':
     segment_core("test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits.png", "test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", scale_factor=2)
-    # main("/home/jswen/dev/solar-yolo/data/fits_images/20150508/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", scale_factor=1, tile_size=512)
+    # segment_core("upscaled_images/dn01/hmi.in_45s.20150508_000000_TAI.2.continuum.fits_out.png", "test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", scale_factor=2, tile_size=512)
