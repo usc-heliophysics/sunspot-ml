@@ -19,13 +19,13 @@ Image.MAX_IMAGE_PIXELS = None
 
 # reads a FITS file as an image array
 def open_fits_image(image_path, image_data_header_location):
-    print(f"Reading {image_path}")
-    image_file = open(image_path, "rb")
-    hdu_list = fits.open(image_file)
-    hdu_list.info()
-    image_data = hdu_list[image_data_header_location].data
+    with open(image_path, "rb") as image_file:
+        hdu_list = fits.open(image_file)
+        hdu_list.info()
+        print()
+        image_data = hdu_list[image_data_header_location].data
     return image_data
-    
+
 
 # prepare a copy of image for segmentation
 def preprocess(image):
@@ -259,7 +259,7 @@ def binarize_features(cleared_img, feature='penumbrae'):
     else:
         return np.zeros_like(cleared_img)
 
-def segment_core(fits_path, image_path=None, feature="penumbrae"):
+def segment_core(fits_path, image_path=None, feature="penumbrae", findroi_kwargs=None, kmeans_kwargs=None, clearbg_kwargs=None):
     # check if file exists
     if not os.path.exists(fits_path):
         raise FileNotFoundError(f"FITS file {fits_path} not found.")
@@ -283,6 +283,13 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
     if not os.path.exists(seg_path):
         os.makedirs(seg_path)
 
+    # set default keyword args for find_roi, kmeans, and clear_bg
+    if not findroi_kwargs:
+        findroi_kwargs = {"num_stdevs": 7, "padding": 40}
+    if not kmeans_kwargs:
+        kmeans_kwargs = {"K": 6, "blur_strength": 1}
+    if not clearbg_kwargs:
+        clearbg_kwargs = {"bwidth": 10, "bg_min_count": 50}
 
     # read fits image and preprocess
     fits_image = open_fits_image(fits_path, 0)
@@ -295,33 +302,29 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
         prepped_image = prepped_fits
 
     # adjust parameters below
-    regions = find_rois(prepped_fits, num_stdevs=7, padding=40)
+    regions = find_rois(prepped_fits, **findroi_kwargs)
     labeled_regions, num_regions = ndi.label(regions)
 
     locs = ndi.find_objects(labeled_regions)
     segmentation = np.zeros_like(fits_image)
     for loc in locs:
         img = prepped_image[loc]
-        clustered = kmeans(img, K=6, blur_strength=1)
-        cleared = clear_bg(clustered, bwidth=10, bg_min_count=50)
+        clustered = kmeans(img, **kmeans_kwargs)
+        cleared = clear_bg(clustered, **clearbg_kwargs)
         binarized = binarize_features(cleared, feature=feature)
         segmentation[loc] = binarized
 
     segmentation = postprocess(segmentation)
 
     # label image
-    print("Labeling...")
     label_image = ski.measure.label(segmentation)
-    print(f"Found {label_image.max()} {feature} in {num_regions} regions of interest.")
 
     # GET FOLLOWING REGION PROPERTIES FROM THESE LABELS
     '''bounding box, area, centroid coords, centroid pixel, intensity, minimum intensity, coords of min intensity 
     pixel, average intensity'''
 
-    print("Getting region properties...")
     props = ski.measure.regionprops(label_image, intensity_image=fits_image)
     regionprop_path = rp_path + f'region_properties_{date}_{time}_.csv'
-    print(f"Writing properties to {regionprop_path}...")
     with open(regionprop_path, 'w') as file:
         file.write(
             "Region Label,BBox Min Y,BBox Min X,BBox Max Y,BBox Max X,Area,Centroid Y,Centroid X,"
@@ -359,25 +362,31 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
     # rescale image intensity to 8-bit dtype so it can be overlaid with labels
     rescaled_image = ski.exposure.rescale_intensity(fits_image)
     base_as_ubyte = ski.util.img_as_ubyte(rescaled_image)
-    print("Plotting features on base image...")
     image_label_overlay = ski.color.label2rgb(label_image, image=base_as_ubyte)
 
 
     # output images from each step
     flipped_segment_image = np.fliplr(segmentation)  # move origin to upper right to match FITS image
     seg_img_path = seg_path + f'segmented_{date}_{time}_.png'
-    print(f"Saving segmented image as {seg_img_path}...")
     ski.io.imsave(seg_img_path, ski.util.img_as_ubyte(flipped_segment_image.astype('bool')), check_contrast=False)
 
     flipped_label_image = np.fliplr(image_label_overlay)    # move origin to upper right to match FITS image
     label_img_path = label_path + f'labeled_{date}_{time}_.png'
-    print(f"Saving labeled image as {label_img_path}...")
     ski.io.imsave(label_img_path, ski.util.img_as_ubyte(flipped_label_image), check_contrast=False)
-    print("Done!")
 
     # remove upscaled image
     # os.remove(base_image_path)
 
+    return (
+        f"Found {label_image.max()} {feature} in {num_regions} regions of interest.\n" + 
+        f"Region properties saved as {regionprop_path}\n" + 
+        f"Segmented image saved as {seg_img_path}\n" + 
+        f"Labeled image saved as {label_img_path}\n" + 
+        "Done!\n"
+    )
+
+
 
 if __name__ == '__main__':
-    segment_core("test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", feature='penumbrae')
+    run = segment_core("test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", feature='penumbrae')
+    print(run)

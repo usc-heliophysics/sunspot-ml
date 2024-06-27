@@ -61,3 +61,4 @@ if len(regprop_list) == len(fits_files):
         prev_cen_pts = cur_cen_pts.copy()
 else:
     print("mismatch between images and regionprops")
+    
