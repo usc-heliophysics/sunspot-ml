@@ -7,7 +7,8 @@ def process_images(image_list, feature, max_workers=4):
         futures = []
         for image in image_list:
             png_path = f"{image}.fits.png"
-            fits_path = f"{image}.fits"
+            # fits_path = f"{image}.fits"
+            fits_path = image
             # Schedule the execution of the main function
             future = executor.submit(segment_core, fits_path, feature=feature)
             futures.append(future)
@@ -26,4 +27,8 @@ image_files = [
     "test_res/hmi.in_45s.20150512_220000_TAI.2.continuum"
 ]
 
-process_images(image_files, feature="penumbrae")
+# process all files in directory
+from glob import glob
+image_files = glob("/home/jswen/dev/solar-yolo/data/fits_images/20150508/*.fits")
+
+process_images(image_files, feature="penumbrae", max_workers=2)

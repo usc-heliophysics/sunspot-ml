@@ -27,22 +27,36 @@ def open_fits_image(image_path, image_data_header_location):
     return image_data
     
 
-# prepare image for segmentation
+# prepare a copy of image for segmentation
 def preprocess(image):
+    processed_img = image.copy()
+    # replace negative values with zero
+    processed_img[processed_img < 0] = 0
     # replace off-disk pixels with mean value of a central tile
-    nrows, ncols = image.shape
+    nrows, ncols = processed_img.shape
     row, col = np.ogrid[:nrows, :ncols]
     cnt_row, cnt_col = nrows // 2, ncols // 2
     
-    central_tile = image.copy()
+    central_tile = processed_img.copy()
     ratio = 40 # ratio of full img width to tile width
     central_tile = central_tile[cnt_row-nrows//ratio:cnt_row+nrows//ratio, cnt_col-ncols//ratio:cnt_col+ncols//ratio]
     
     # mask out pixels that lie outside of a disk with radius 91% of img size
     outer_disk_mask = ((row - cnt_row)**2 + (col - cnt_col)**2 > (nrows / 2 * 0.91)**2)
-    
-    image[outer_disk_mask] = np.mean(central_tile)
-    return image
+    processed_img[outer_disk_mask] = np.mean(central_tile)
+    # clip overly bright values and set them to the mean value
+    processed_img[processed_img > np.mean(central_tile) + 3*np.std(central_tile)] = np.mean(central_tile)
+    return processed_img
+
+
+# remove small objects and fill holes in binary segmentation image
+def postprocess(binary_image):
+    processed_img = binary_image.copy()
+    structure = np.ones((2, 2))
+    opened = ndi.binary_opening(processed_img, structure=structure)
+    closed = ndi.binary_closing(opened, structure=structure)
+    filled = ndi.binary_fill_holes(closed)
+    return filled
 
 
 def find_rois(image, num_stdevs=7, padding=50):
@@ -251,9 +265,24 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
         raise FileNotFoundError(f"FITS file {fits_path} not found.")
     if image_path and not os.path.exists(image_path):
         raise FileNotFoundError(f"Image file {image_path} not found.")
-    
+       
     #extract the date from the fits file path
     date, time = fits_path.split('/')[-1].split('.')[2].split('_')[:2]
+
+    # make output directories
+    outpath = f'output/{date}/'
+    rp_path = outpath + 'regionprops/'
+    label_path = outpath + 'labeled/'
+    seg_path = outpath + 'segmented/'
+    if not os.path.exists(outpath):
+        os.makedirs(outpath)
+    if not os.path.exists(rp_path):
+        os.makedirs(rp_path)
+    if not os.path.exists(label_path):
+        os.makedirs(label_path)
+    if not os.path.exists(seg_path):
+        os.makedirs(seg_path)
+
 
     # read fits image and preprocess
     fits_image = open_fits_image(fits_path, 0)
@@ -265,17 +294,20 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
     else:
         prepped_image = prepped_fits
 
-    regions = find_rois(prepped_fits)
+    # adjust parameters below
+    regions = find_rois(prepped_fits, num_stdevs=7, padding=40)
     labeled_regions, num_regions = ndi.label(regions)
 
     locs = ndi.find_objects(labeled_regions)
     segmentation = np.zeros_like(fits_image)
     for loc in locs:
         img = prepped_image[loc]
-        clustered = kmeans(img, K=5, blur_strength=5)
+        clustered = kmeans(img, K=6, blur_strength=1)
         cleared = clear_bg(clustered, bwidth=10, bg_min_count=50)
         binarized = binarize_features(cleared, feature=feature)
         segmentation[loc] = binarized
+
+    segmentation = postprocess(segmentation)
 
     # label image
     print("Labeling...")
@@ -288,7 +320,7 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
 
     print("Getting region properties...")
     props = ski.measure.regionprops(label_image, intensity_image=fits_image)
-    regionprop_path = f'output/region_properties_{date}_{time}_.csv'
+    regionprop_path = rp_path + f'region_properties_{date}_{time}_.csv'
     print(f"Writing properties to {regionprop_path}...")
     with open(regionprop_path, 'w') as file:
         file.write(
@@ -314,7 +346,7 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
             # Convert local coordinates of the minimum to global coordinates
             min_intensity_coords = (min_intensity_coords[0] + x_min, min_intensity_coords[1] + y_min)
 
-            mean_intensity = np.mean(region_slice)
+            mean_intensity = int(np.mean(region_slice))
 
             # Format the data as a string to write to the file
             region_data = (
@@ -332,13 +364,15 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
 
 
     # output images from each step
-    seg_img_path = f'output/segmented_{date}_{time}_.png'
+    flipped_segment_image = np.fliplr(segmentation)  # move origin to upper right to match FITS image
+    seg_img_path = seg_path + f'segmented_{date}_{time}_.png'
     print(f"Saving segmented image as {seg_img_path}...")
-    ski.io.imsave(seg_img_path, ski.util.img_as_ubyte(segmentation.astype('bool')), check_contrast=False)
+    ski.io.imsave(seg_img_path, ski.util.img_as_ubyte(flipped_segment_image.astype('bool')), check_contrast=False)
 
-    label_img_path = f'output/labeled_{date}_{time}_.png'
+    flipped_label_image = np.fliplr(image_label_overlay)    # move origin to upper right to match FITS image
+    label_img_path = label_path + f'labeled_{date}_{time}_.png'
     print(f"Saving labeled image as {label_img_path}...")
-    ski.io.imsave(label_img_path, ski.util.img_as_ubyte(image_label_overlay), check_contrast=False)
+    ski.io.imsave(label_img_path, ski.util.img_as_ubyte(flipped_label_image), check_contrast=False)
     print("Done!")
 
     # remove upscaled image
@@ -346,4 +380,4 @@ def segment_core(fits_path, image_path=None, feature="penumbrae"):
 
 
 if __name__ == '__main__':
-    segment_core("test_res/hmi.in_45s.20150512_000000_TAI.2.continuum.fits", feature='penumbrae')
+    segment_core("test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", feature='penumbrae')
