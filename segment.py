@@ -17,18 +17,21 @@ from astropy.io import fits
 Image.MAX_IMAGE_PIXELS = None
 
 
-# reads a FITS file as an image array
 def open_fits_image(image_path, image_data_header_location):
+    """
+    reads a FITS file as an image array
+    """
     with open(image_path, "rb") as image_file:
         hdu_list = fits.open(image_file)
         hdu_list.info()
-        print()
         image_data = hdu_list[image_data_header_location].data
     return image_data
 
 
-# prepare a copy of image for segmentation
 def preprocess(image):
+    """
+    prepare a copy of image for segmentation
+    """
     processed_img = image.copy()
     # replace negative values with zero
     processed_img[processed_img < 0] = 0
@@ -49,8 +52,10 @@ def preprocess(image):
     return processed_img
 
 
-# remove small objects and fill holes in binary segmentation image
 def postprocess(binary_image):
+    """
+    remove small objects and fill holes in binary segmentation image
+    """
     processed_img = binary_image.copy()
     structure = np.ones((2, 2))
     opened = ndi.binary_opening(processed_img, structure=structure)
