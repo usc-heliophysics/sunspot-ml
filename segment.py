@@ -292,7 +292,7 @@ def segment_core(fits_path, image_path=None, feature="penumbrae", findroi_kwargs
     if not findroi_kwargs:
         findroi_kwargs = {"num_stdevs": 7, "padding": 40}
     if not kmeans_kwargs:
-        kmeans_kwargs = {"K": 6, "blur_strength": 1}
+        kmeans_kwargs = {"K": 5, "blur_strength": 3}
     if not clearbg_kwargs:
         clearbg_kwargs = {"bwidth": 10, "bg_min_count": 50}
 
