@@ -5,69 +5,68 @@ Authors: James Wen (jswen@usc.edu) and Sid Qian (sidqian@usc.edu)
 """
 
 import os
-import subprocess
 import cupy as cp
 import cv2
-import skimage as ski
-from cupyx.scipy import ndimage as ndi
+import cucim.skimage as ski
+from scipy import ndimage as ndi
 from PIL.Image import Image
 from astropy.io import fits
+import imageio.v2 as imageio
 
 Image.MAX_IMAGE_PIXELS = None
 
 def open_fits_image(image_path, image_data_header_location):
     """
-    reads a FITS file as an image array
+    Reads a FITS file as an image array.
     """
-    with open(image_path, "rb") as image_file:
-        hdu_list = fits.open(image_file)
+    with fits.open(image_path) as hdu_list:
         hdu_list.info()
         image_data = hdu_list[image_data_header_location].data
-    return cp.asarray(image_data)
+    return cp.array(image_data)
 
 def preprocess(image):
     """
-    prepare a copy of image for segmentation
+    Prepare a copy of image for segmentation.
     """
     processed_img = image.copy()
-    # replace negative values with zero
+    # Replace negative values with zero
     processed_img[processed_img < 0] = 0
-    # replace off-disk pixels with mean value of a central tile
+    # Replace off-disk pixels with mean value of a central tile
     nrows, ncols = processed_img.shape
     row, col = cp.ogrid[:nrows, :ncols]
     cnt_row, cnt_col = nrows // 2, ncols // 2
-
+    
     central_tile = processed_img.copy()
-    ratio = 40  # ratio of full img width to tile width
+    ratio = 40  # Ratio of full img width to tile width
     central_tile = central_tile[cnt_row-nrows//ratio:cnt_row+nrows//ratio, cnt_col-ncols//ratio:cnt_col+ncols//ratio]
-
-    # mask out pixels that lie outside of a disk with radius 91% of img size
+    
+    # Mask out pixels that lie outside of a disk with radius 91% of img size
     outer_disk_mask = ((row - cnt_row)**2 + (col - cnt_col)**2 > (nrows / 2 * 0.91)**2)
     processed_img[outer_disk_mask] = cp.mean(central_tile)
-    # clip overly bright values and set them to the mean value
+    # Clip overly bright values and set them to the mean value
     processed_img[processed_img > cp.mean(central_tile) + 3*cp.std(central_tile)] = cp.mean(central_tile)
     return processed_img
 
 def postprocess(binary_image):
     """
-    remove small objects and fill holes in binary segmentation image
+    Remove small objects and fill holes in binary segmentation image.
     """
     processed_img = binary_image.copy()
     structure = cp.ones((2, 2))
-    opened = ndi.binary_opening(processed_img, structure=structure)
-    closed = ndi.binary_closing(opened, structure=structure)
+    opened = ndi.binary_opening(cp.asnumpy(processed_img), structure=cp.asnumpy(structure))
+    closed = ndi.binary_closing(opened, structure=cp.asnumpy(structure))
     filled = ndi.binary_fill_holes(closed)
-    return filled
+    return cp.array(filled)
 
 def find_rois(image, num_stdevs=7, padding=50):
     """
-    Finds the darkest pixels in an image and isolates the surrounding region of interest.
+    Finds the darkest pixels in an image and isolates the surrounding region of interest. 
 
-    The dark pixels are chosen by the number of standard deviations they are below
+    The dark pixels are chosen by the number of standard deviations they are below 
     the global mean intensity. A square region whose width is determined by the padding
     parameter is then drawn around each chosen pixel.
 
-    NOTE: in general, more padding works better for segmenting images with highly variable backgrounds,
+    NOTE: in general, more padding works better for segmenting images with highly variable backgrounds, 
     as more objects will be grouped in the same region of interest and the background is "smoothed out".
 
     Parameters
@@ -80,14 +79,14 @@ def find_rois(image, num_stdevs=7, padding=50):
         will be used to locate regions of interest.
 
     padding: int, optional
-        The amount of padding. This should be chosen such that the objects to be segmented
+        The amount of padding. This should be chosen such that the objects to be segmented 
         are not touching the edges of the region of interest.
 
     Returns
     -------
     regions: ndarray
-        A copy of the input image, but with every value outside the regions of interest
-        set to zero.
+        A copy of the input image, but with every value outside the regions of interest 
+        set to zero. 
     """
     image = ski.util.img_as_float(image)
     vals = image.flatten()
@@ -97,13 +96,12 @@ def find_rois(image, num_stdevs=7, padding=50):
     regions = cp.zeros_like(image)
     min_idxs = cp.argwhere(image < mean - num_stdevs*std)
     for idx in min_idxs:
-        # plot min idxs as markers
         markers[idx[0], idx[1]] = image[idx[0], idx[1]]
-        # expand by padding a box surrounding the marker
         box = [idx[0]-padding, idx[1]-padding, idx[0]+padding-1, idx[1]+padding-1]
         regions[box[0]:box[2], box[1]:box[3]] = image[box[0]:box[2], box[1]:box[3]]
     return regions
 
+# Apply K-means clustering with an optional gaussian blur
 def kmeans(image, K, blur_strength=1, return_info=False):
     """
     Apply K-means clustering with an optional gaussian blur.
@@ -132,37 +130,35 @@ def kmeans(image, K, blur_strength=1, return_info=False):
     Returns
     -------
     compactness: float
-        A measure of how closely the member values of each cluster match its central value.
+        A measure of how closely the member values of each cluster match its central value. 
         The K-means algorithm seeks to maximize this value. Only returned if `return_info` is True.
 
     labels: ndarray
-        An array of labels for each value in the input image. The labels are indices for
+        An array of labels for each value in the input image. The labels are indices for 
         the array of cluster centers. Only returned if `return_info` is True.
 
     centers: ndarray
-        An array of cluster centers, where each element represents the cluster's central value.
+        An array of cluster centers, where each element represents the cluster's central value. 
         Only returned if `return_info` is True.
 
     result: ndarray
         The resulting image, where each pixel is replaced by the central value of the cluster it
-        belongs to.
+        belongs to. 
     """
     if blur_strength > 1:
-        image = cv2.GaussianBlur(cp.float32(image), (blur_strength,blur_strength), 0)
+        image = cv2.GaussianBlur(cp.asnumpy(image).astype(cp.float32), (blur_strength, blur_strength), 0)
     else:
-        image = cp.float32(image)
+        image = cp.asnumpy(image).astype(cp.float32)
     Z = image.reshape(-1)
-
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+    
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0) 
     flags = cv2.KMEANS_PP_CENTERS
-
-    # apply K-means algorithm
+    
     compactness, labels, centers = cv2.kmeans(Z, K, None, criteria, 10, flags)
 
-    # paint each pixel in array with its labeled center value
     painted_array = centers[labels.flatten()]
-    result = painted_array.reshape(image.shape)
-
+    result = cp.array(painted_array.reshape(image.shape))
+    
     if return_info:
         return compactness, labels, centers, result
     else:
@@ -173,10 +169,10 @@ def clear_bg(clustered_img, bwidth=10, bg_min_count=50, return_vals=False):
     Clears background of a k-clustered image, assuming border pixels are not objects of interest.
 
     The pixel values on the image edges are considered background and removed (set to zero).
-    The objects of interest are assumed to be centered, substantially brighter/darker than
-    the background, and sufficiently padded by background pixels.
-
-    To account for features that may lie near the edge, pixel values must meet a minimum number
+    The objects of interest are assumed to be centered, substantially brighter/darker than 
+    the background, and sufficiently padded by background pixels. 
+    
+    To account for features that may lie near the edge, pixel values must meet a minimum number 
     of occurences to be considered background.
 
     Parameters
@@ -201,10 +197,8 @@ def clear_bg(clustered_img, bwidth=10, bg_min_count=50, return_vals=False):
     vals: tuple(ndarray)
         A tuple with an array of unique pixel values within the border, followed by
         an array of counts for each value.
-
     """
     R = clustered_img.flatten()
-    # set highest value to zero. this is to deal with plages surrounding sunspots
     R[R == R.max()] = 0
     nrows, ncols = clustered_img.shape
     border = cp.copy(clustered_img)
@@ -232,13 +226,13 @@ def binarize_features(cleared_img, feature='penumbrae'):
         The image to binarize. the background pixels should be 0.
 
     feature: str, optional
-        The target feature, either penumbrae or umbrae.
+        The target feature, either penumbrae or umbrae. 
         Umbrae are assumed to be the darker of the two.
 
     Returns
     -------
     binarized: ndarray
-        The binarized image.
+        The binarized image. 
     """
     unique_vals = cp.unique(cleared_img)
     nonzero_uniques = unique_vals[cp.nonzero(unique_vals)]
@@ -256,16 +250,16 @@ def binarize_features(cleared_img, feature='penumbrae'):
         return cp.zeros_like(cleared_img)
 
 def segment_core(fits_path, image_path=None, feature="penumbrae", findroi_kwargs=None, kmeans_kwargs=None, clearbg_kwargs=None):
-    # check if file exists
+    # Check if file exists
     if not os.path.exists(fits_path):
         raise FileNotFoundError(f"FITS file {fits_path} not found.")
     if image_path and not os.path.exists(image_path):
         raise FileNotFoundError(f"Image file {image_path} not found.")
-
-    #extract the date from the fits file path
+       
+    # Extract the date from the fits file path
     date, time = fits_path.split('/')[-1].split('.')[2].split('_')[:2]
 
-    # make output directories
+    # Make output directories
     outpath = f'output/{date}/'
     rp_path = outpath + 'regionprops/'
     label_path = outpath + 'labeled/'
@@ -279,27 +273,28 @@ def segment_core(fits_path, image_path=None, feature="penumbrae", findroi_kwargs
     if not os.path.exists(seg_path):
         os.makedirs(seg_path)
 
-    # set default keyword args for find_roi, kmeans, and clear_bg
+    # Set default keyword args for find_roi, kmeans, and clear_bg
     if not findroi_kwargs:
         findroi_kwargs = {"num_stdevs": 7, "padding": 40}
     if not kmeans_kwargs:
-        kmeans_kwargs = {"K": 6, "blur_strength": 1}
+        kmeans_kwargs = {"K": 5, "blur_strength": 3}
     if not clearbg_kwargs:
         clearbg_kwargs = {"bwidth": 10, "bg_min_count": 50}
 
-    # read fits image and preprocess
+    # Read fits image and preprocess
     fits_image = open_fits_image(fits_path, 0)
     prepped_fits = preprocess(fits_image)
 
     if image_path:
         image = ski.io.imread(image_path, as_gray=True)
+        image = cp.array(image)
         prepped_image = preprocess(image)
     else:
         prepped_image = prepped_fits
 
-    # adjust parameters below
+    # Adjust parameters below
     regions = find_rois(prepped_fits, **findroi_kwargs)
-    labeled_regions, num_regions = ndi.label(regions)
+    labeled_regions, num_regions = ndi.label(cp.asnumpy(regions))
 
     locs = ndi.find_objects(labeled_regions)
     segmentation = cp.zeros_like(fits_image)
@@ -312,14 +307,14 @@ def segment_core(fits_path, image_path=None, feature="penumbrae", findroi_kwargs
 
     segmentation = postprocess(segmentation)
 
-    # label image
-    label_image = ski.measure.label(cp.asnumpy(segmentation))
+    # Label image
+    label_image = ski.measure.label(segmentation)
 
-    # GET FOLLOWING REGION PROPERTIES FROM THESE LABELS
+    # Get following region properties from these labels
     '''bounding box, area, centroid coords, centroid pixel, intensity, minimum intensity, coords of min intensity 
     pixel, average intensity'''
 
-    props = ski.measure.regionprops(label_image, intensity_image=cp.asnumpy(fits_image))
+    props = ski.measure.regionprops(label_image, intensity_image=fits_image)
     regionprop_path = rp_path + f'region_properties_{date}_{time}_.csv'
     with open(regionprop_path, 'w') as file:
         file.write(
@@ -329,7 +324,7 @@ def segment_core(fits_path, image_path=None, feature="penumbrae", findroi_kwargs
         for region in props:
             bbox = tuple([int(b) for b in region.bbox])
             centroid = tuple([int(c) for c in region.centroid])
-            area = int(region.area)
+            area = int(region.area) 
 
             # Get intensity data directly from the fits_image using adjusted coordinates
             centroid_intensity = fits_image[centroid]
@@ -355,25 +350,26 @@ def segment_core(fits_path, image_path=None, feature="penumbrae", findroi_kwargs
             )
             file.write(region_data)
 
-    # rescale image intensity to 8-bit dtype so it can be overlaid with labels
-    rescaled_image = ski.exposure.rescale_intensity(cp.asnumpy(fits_image))
+    # Rescale image intensity to 8-bit dtype so it can be overlaid with labels
+    rescaled_image = ski.exposure.rescale_intensity(fits_image)
     base_as_ubyte = ski.util.img_as_ubyte(rescaled_image)
+    base_as_ubyte = cp.array(base_as_ubyte)
     image_label_overlay = ski.color.label2rgb(label_image, image=base_as_ubyte)
 
-    # output images from each step
-    flipped_segment_image = cp.fliplr(segmentation)  # move origin to upper right to match FITS image
+    # Output images from each step
+    flipped_segment_image = cp.fliplr(segmentation)  # Move origin to upper right to match FITS image
     seg_img_path = seg_path + f'segmented_{date}_{time}_.png'
-    ski.io.imsave(seg_img_path, ski.util.img_as_ubyte(cp.asnumpy(flipped_segment_image.astype('bool'))), check_contrast=False)
+    imageio.imwrite(seg_img_path, cp.asnumpy(ski.util.img_as_ubyte(flipped_segment_image.astype('bool'))))
 
-    flipped_label_image = cp.fliplr(cp.asarray(image_label_overlay))  # move origin to upper right to match FITS image
+    flipped_label_image = cp.fliplr(image_label_overlay)  # Move origin to upper right to match FITS image
     label_img_path = label_path + f'labeled_{date}_{time}_.png'
-    ski.io.imsave(label_img_path, ski.util.img_as_ubyte(cp.asnumpy(flipped_label_image)), check_contrast=False)
+    imageio.imwrite(label_img_path, cp.asnumpy(ski.util.img_as_ubyte(flipped_label_image)))
 
     return (
-        f"Found {label_image.max()} {feature} in {num_regions} regions of interest.\n" +
-        f"Region properties saved as {regionprop_path}\n" +
-        f"Segmented image saved as {seg_img_path}\n" +
-        f"Labeled image saved as {label_img_path}\n" +
+        f"Found {label_image.max()} {feature} in {num_regions} regions of interest.\n" + 
+        f"Region properties saved as {regionprop_path}\n" + 
+        f"Segmented image saved as {seg_img_path}\n" + 
+        f"Labeled image saved as {label_img_path}\n" + 
         "Done!\n"
     )
 
