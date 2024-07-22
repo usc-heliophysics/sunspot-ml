@@ -26,7 +26,8 @@ def list_fits_files(directory):
     return image_files
 
 
-directory_path = 'test_res/20150512_96'
+# directory_path = 'test_res/20150512_96'
+directory_path = 'data/fits_images/20150508'
 fits_files = list_fits_files(directory_path)
 
 image_files = [
@@ -46,8 +47,8 @@ if __name__ == '__main__':
     feature = "penumbrae"
 
     # these parameters have been found to work well for the various processing steps:
-    findroi_kwargs = {"num_stdevs": 7, "padding": 40}
-    kmeans_kwargs = {"K": 6, "blur_strength": 1}
+    findroi_kwargs = {"num_stdevs": 8, "padding": 50}
+    kmeans_kwargs = {"K": 7, "blur_strength": 3}
     clearbg_kwargs = {"bwidth": 10, "bg_min_count": 50}
 
     process_images(fits_files, max_workers=4,
