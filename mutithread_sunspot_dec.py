@@ -26,7 +26,12 @@ def list_fits_files(directory):
     return image_files
 
 
+<<<<<<< HEAD
 directory_path = '/home/jswen/dev/solar-yolo/data/fits_images/20150508'
+=======
+# directory_path = 'test_res/20150512_96'
+directory_path = 'data/fits_images/20150508'
+>>>>>>> 34eef5533ab7e2c7d574f5464a5f9117a5b46d33
 fits_files = list_fits_files(directory_path)
 
 image_files = [

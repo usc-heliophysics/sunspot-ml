@@ -21,10 +21,12 @@ def open_fits_image(image_path, image_data_header_location):
     """
     reads a FITS file as an image array
     """
+    print(f"reading {image_path}...")
     with open(image_path, "rb") as image_file:
         hdu_list = fits.open(image_file)
-        hdu_list.info()
         image_data = hdu_list[image_data_header_location].data
+    # replace negative values with zero
+    image_data[image_data < 0] = 0
     return image_data
 
 
@@ -32,24 +34,32 @@ def preprocess(image):
     """
     prepare a copy of image for segmentation
     """
-    processed_img = image.copy()
-    # replace negative values with zero
-    processed_img[processed_img < 0] = 0
+    # binarize image and find bounds of non-black area
+    binary = image.copy().astype("int32")
+    binary[binary < 0] = 0
+    binary[binary > 0] = 1
+    white = np.where(binary == 1)
+    xmin, ymin, xmax, ymax = np.min(white[1]), np.min(white[0]), np.max(white[1]), np.max(white[0])
+    crop = image.copy()[ymin:ymax, xmin:xmax]
+    
     # replace off-disk pixels with mean value of a central tile
-    nrows, ncols = processed_img.shape
+    nrows, ncols = crop.shape
     row, col = np.ogrid[:nrows, :ncols]
     cnt_row, cnt_col = nrows // 2, ncols // 2
-    
-    central_tile = processed_img.copy()
+    central_tile = crop.copy()
     ratio = 40 # ratio of full img width to tile width
     central_tile = central_tile[cnt_row-nrows//ratio:cnt_row+nrows//ratio, cnt_col-ncols//ratio:cnt_col+ncols//ratio]
-    
-    # mask out pixels that lie outside of a disk with radius 91% of img size
-    outer_disk_mask = ((row - cnt_row)**2 + (col - cnt_col)**2 > (nrows / 2 * 0.91)**2)
-    processed_img[outer_disk_mask] = np.mean(central_tile)
+    mean, std = np.mean(central_tile), np.std(central_tile)
+    # mask out pixels that lie outside of a disk with radius 99% of img size
+    outer_disk_mask = ((row - cnt_row)**2 + (col - cnt_col)**2 > (nrows / 2 * 0.99)**2)
+    crop[outer_disk_mask] = mean
     # clip overly bright values and set them to the mean value
-    processed_img[processed_img > np.mean(central_tile) + 3*np.std(central_tile)] = np.mean(central_tile)
-    return processed_img
+    crop[crop > mean + 3*std] = mean
+
+    # place cropped image back into original and fill edges with mean values
+    result = np.full_like(image, mean)
+    result[ymin:ymax, xmin:xmax] = crop
+    return result
 
 
 def postprocess(binary_image):
@@ -64,7 +74,7 @@ def postprocess(binary_image):
     return filled
 
 
-def find_rois(image, num_stdevs=7, padding=50):
+def find_rois(image, num_stdevs=7, padding=50, min_count=0):
     """
     Finds the darkest pixels in an image and isolates the surrounding region of interest. 
 
@@ -106,7 +116,10 @@ def find_rois(image, num_stdevs=7, padding=50):
         markers[idx[0], idx[1]] = image[idx[0], idx[1]]
         # expand by padding a box surrounding the marker
         box = [idx[0]-padding, idx[1]-padding, idx[0]+padding-1, idx[1]+padding-1]
-        regions[box[0]:box[2], box[1]:box[3]] = image[box[0]:box[2], box[1]:box[3]]
+        # check if there's enough dark pixels in the box
+        region_of_interest = image[box[0]:box[2], box[1]:box[3]]
+        if (region_of_interest < mean - num_stdevs*std).sum() > min_count:
+            regions[box[0]:box[2], box[1]:box[3]] = region_of_interest
     return regions
 
 
@@ -280,17 +293,17 @@ def segment_core(fits_path, image_path=None, feature="penumbrae", findroi_kwargs
     label_path = outpath + 'labeled/'
     seg_path = outpath + 'segmented/'
     if not os.path.exists(outpath):
-        os.makedirs(outpath)
+        os.makedirs(outpath, exist_ok=True)
     if not os.path.exists(rp_path):
-        os.makedirs(rp_path)
+        os.makedirs(rp_path, exist_ok=True)
     if not os.path.exists(label_path):
-        os.makedirs(label_path)
+        os.makedirs(label_path, exist_ok=True)
     if not os.path.exists(seg_path):
-        os.makedirs(seg_path)
+        os.makedirs(seg_path, exist_ok=True)
 
     # set default keyword args for find_roi, kmeans, and clear_bg
     if not findroi_kwargs:
-        findroi_kwargs = {"num_stdevs": 7, "padding": 40}
+        findroi_kwargs = {"num_stdevs": 7, "padding": 50}
     if not kmeans_kwargs:
         kmeans_kwargs = {"K": 5, "blur_strength": 3}
     if not clearbg_kwargs:
@@ -393,5 +406,5 @@ def segment_core(fits_path, image_path=None, feature="penumbrae", findroi_kwargs
 
 
 if __name__ == '__main__':
-    run = segment_core("test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", feature='penumbrae')
+    run = segment_core("test_res/hmi.in_45s.20150508_230000_TAI.2.continuum.fits", feature='penumbrae')
     print(run)
