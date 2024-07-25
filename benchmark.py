@@ -3,7 +3,7 @@ import sys
 import time
 from tqdm import tqdm
 import shutil
-from mutithread_sunspot_dec import list_fits_files, process_images
+from multithread_sunseg import list_fits_files, process_images
 
 directory_path = 'test_res/20150512_96'
 output_directory = 'output/20150512'

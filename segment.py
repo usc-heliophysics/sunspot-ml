@@ -277,7 +277,7 @@ def binarize_features(cleared_img, feature='penumbrae'):
     else:
         return np.zeros_like(cleared_img)
 
-def segment_core(fits_path, image_path=None, feature="penumbrae", findroi_kwargs=None, kmeans_kwargs=None, clearbg_kwargs=None):
+def segment_core(fits_path, image_path=None, output_path=None, feature="penumbrae", findroi_kwargs=None, kmeans_kwargs=None, clearbg_kwargs=None):
     # check if file exists
     if not os.path.exists(fits_path):
         raise FileNotFoundError(f"FITS file {fits_path} not found.")
@@ -288,7 +288,10 @@ def segment_core(fits_path, image_path=None, feature="penumbrae", findroi_kwargs
     date, time = fits_path.split('/')[-1].split('.')[2].split('_')[:2]
 
     # make output directories
-    outpath = f'output/{date}/'
+    if not output_path:
+        outpath = f'output/{date}/'
+    else:
+        outpath = output_path + f'/output/{date}/'
     rp_path = outpath + 'regionprops/'
     label_path = outpath + 'labeled/'
     seg_path = outpath + 'segmented/'
@@ -305,7 +308,7 @@ def segment_core(fits_path, image_path=None, feature="penumbrae", findroi_kwargs
     if not findroi_kwargs:
         findroi_kwargs = {"num_stdevs": 7, "padding": 50}
     if not kmeans_kwargs:
-        kmeans_kwargs = {"K": 5, "blur_strength": 3}
+        kmeans_kwargs = {"K": 5, "blur_strength": 1}
     if not clearbg_kwargs:
         clearbg_kwargs = {"bwidth": 10, "bg_min_count": 50}
 
