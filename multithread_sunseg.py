@@ -28,7 +28,7 @@ def list_fits_files(directory):
 
 parser = argparse.ArgumentParser()
 parser.add_argument("inpdir", help="path to the input directory containing fits images")
-parser.add_argument("outdir", help="path to the output directory")
+parser.add_argument("-o", "--outdir", help="path to the output directory")
 args = parser.parse_args()
 
 directory_path = args.inpdir

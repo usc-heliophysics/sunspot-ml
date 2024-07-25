@@ -22,8 +22,7 @@ def open_fits_image(image_path, image_data_header_location):
     reads a FITS file as an image array
     """
     print(f"reading {image_path}...")
-    with open(image_path, "rb") as image_file:
-        hdu_list = fits.open(image_file)
+    with fits.open(image_path) as hdu_list:
         image_data = hdu_list[image_data_header_location].data
     # replace negative values with zero
     image_data[image_data < 0] = 0
