@@ -50,7 +50,7 @@ def preprocess(image):
     central_tile = central_tile[cnt_row-nrows//ratio:cnt_row+nrows//ratio, cnt_col-ncols//ratio:cnt_col+ncols//ratio]
     mean, std = np.mean(central_tile), np.std(central_tile)
     # mask out pixels that lie outside of a disk with radius 99% of img size
-    outer_disk_mask = ((row - cnt_row)**2 + (col - cnt_col)**2 > (nrows / 2 * 0.99)**2)
+    outer_disk_mask = ((row - cnt_row)**2 + (col - cnt_col)**2 > (nrows / 2 * 0.995)**2)
     crop[outer_disk_mask] = mean
     # clip overly bright values and set them to the mean value
     crop[crop > mean + 3*std] = mean
