@@ -51,9 +51,9 @@ if __name__ == '__main__':
     feature = "penumbrae"
 
     # these parameters have been found to work well for the various processing steps:
-    findroi_kwargs = {"num_stdevs": 7, "padding": 50}
+    findroi_kwargs = {"num_stdevs": 7, "padding": 50, "min_count": 4}
     kmeans_kwargs = {"K": 5, "blur_strength": 1}
-    clearbg_kwargs = {"bwidth": 10, "bg_min_count": 50}
+    clearbg_kwargs = {"bwidth": 20}
 
     process_images(fits_files, max_workers=4, output_path=args.outdir,
                    feature=feature, findroi_kwargs=findroi_kwargs,

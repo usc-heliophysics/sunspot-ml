@@ -61,19 +61,23 @@ def preprocess(image):
     return result
 
 
-def postprocess(binary_image):
-    """
-    remove small objects and fill holes in binary segmentation image
-    """
-    processed_img = binary_image.copy()
-    structure = np.ones((2, 2))
-    opened = ndi.binary_opening(processed_img, structure=structure)
-    closed = ndi.binary_closing(opened, structure=structure)
-    filled = ndi.binary_fill_holes(closed)
-    return filled
+# currently unused.
+# def postprocess(binary_image):
+#     """
+#     remove small objects and fill holes in binary segmentation image. 
+#     """
+#     processed_img = binary_image.copy()
+#     # structure = np.ones((2, 2))
+#     structure = np.array([[0, 1, 0],
+#                           [1, 1, 1],
+#                           [0, 1, 0]])
+#     opened = ndi.binary_opening(processed_img, structure=structure)
+#     closed = ndi.binary_closing(opened, structure=structure)
+#     filled = ndi.binary_fill_holes(closed)
+#     return filled
 
 
-def find_rois(image, num_stdevs=7, padding=50, min_count=0):
+def find_rois(image, num_stdevs=7, padding=50, min_count=4):
     """
     Finds the darkest pixels in an image and isolates the surrounding region of interest. 
 
@@ -188,16 +192,16 @@ def kmeans(image, K, blur_strength=1, return_info=False):
         return result
 
 
-def clear_bg(clustered_img, bwidth=10, bg_min_count=50, return_vals=False):
+def clear_bg(clustered_img, bwidth=20, return_vals=False):
     """
     Clears background of a k-clustered image, assuming border pixels are not objects of interest.
 
-    The pixel values on the image edges are considered background and removed (set to zero).
-    The objects of interest are assumed to be centered, substantially brighter/darker than 
-    the background, and sufficiently padded by background pixels. 
+    The most abundant pixels in a border of certain width are considered background and set to zero.
+    The objects of interest are assumed to be centered, substantially brighter/darker than the 
+    background, and sufficiently padded by background pixels. 
     
-    To account for features that may lie near the edge, pixel values must meet a minimum number 
-    of occurences to be considered background.
+    A pixel is considered background if it is within 3 standard deviations of the mean value of the 
+    pixels that lie within the border.
 
     Parameters
     ----------
@@ -205,10 +209,7 @@ def clear_bg(clustered_img, bwidth=10, bg_min_count=50, return_vals=False):
         The image to be cleared. Assumed to be processed with K-means clustering.
 
     bwidth: int, optional
-        Width of the border in pixels. The shape of the border will be rectangular. Default: 10
-
-    bg_min_count: int, optional
-        Minimum count required for a pixel value to count as background. Default: 50
+        Width of the border in pixels. The shape of the border will be rectangular. Default: 20
 
     return_vals: bool, optional
         Whether to return the values and number of occurences of pixels found in the border.
@@ -218,9 +219,11 @@ def clear_bg(clustered_img, bwidth=10, bg_min_count=50, return_vals=False):
     cleared: ndarray
         The image with background removed.
 
-    vals: tuple(ndarray)
-        A tuple with an array of unique pixel values within the border, followed by
-        an array of counts for each value.
+    border_vals: ndarray
+        1d array of pixel values that lie within the border.
+
+    background_vals: ndarray
+        1d array of each unique value that was selected as background.
 
     """
     R = clustered_img.flatten()
@@ -229,12 +232,17 @@ def clear_bg(clustered_img, bwidth=10, bg_min_count=50, return_vals=False):
     nrows, ncols = clustered_img.shape
     border = np.copy(clustered_img)
     border[bwidth:nrows-bwidth, bwidth:ncols-bwidth] = 0
-    unique_vals, counts = np.unique(border, return_counts=True)
-    unique_vals = unique_vals[np.where(counts > bg_min_count)]
-    R[np.argwhere(np.in1d(R, unique_vals))] = 0
+    border_vals = border[np.nonzero(border)]
+    unique_vals = np.unique(border_vals)
+    mean = border_vals.mean()
+    std = border_vals.std()
+    upper_bound = mean + 3*std
+    lower_bound = mean - 3*std
+    background_vals = unique_vals[np.logical_and(unique_vals > lower_bound, unique_vals < upper_bound)]
+    R[np.argwhere(np.isin(R, background_vals))] = 0
     cleared = R.reshape(clustered_img.shape)
     if return_vals:
-        return cleared, (unique_vals, counts)
+        return cleared, border_vals, background_vals
     else:
         return cleared
 
@@ -261,20 +269,30 @@ def binarize_features(cleared_img, feature='penumbrae'):
     binarized: ndarray
         The binarized image. 
     """
-    unique_vals = np.unique(cleared_img)
-    nonzero_uniques = unique_vals[np.nonzero(unique_vals)]
-    if nonzero_uniques.any():
-        binarized = np.copy(cleared_img)
-        if feature == 'penumbrae':
-            binarized[binarized > 0] = 1
-        elif feature == 'umbrae':
-            binarized[binarized > np.min(nonzero_uniques)] = 0
-            binarized[binarized == np.min(nonzero_uniques)] = 1
-        else:
-            raise Exception("Detection of this feature is not supported.")
-        return binarized
+    labeled_regions, num_regions = ndi.label(cleared_img)
+    locs = ndi.find_objects(labeled_regions)
+    binarized = np.copy(cleared_img)
+    
+    if feature == "penumbrae":
+        for loc in locs:
+            spot = np.copy(cleared_img[loc])
+            if len(spot[np.nonzero(spot)]) < 4:
+                binarized[loc] = 0
+            else:
+                spot[spot > 0] = 1
+                binarized[loc] = spot
+    elif feature == "umbrae":
+        for loc in locs:
+            spot = np.copy(cleared_img[loc])
+            spot[spot == np.max(spot[np.nonzero(spot)])] = 0
+            if spot.any():
+                spot[spot > np.min(spot[np.nonzero(spot)])] = 0
+                spot[spot == np.min(spot[np.nonzero(spot)])] = 1
+            binarized[loc] = spot
     else:
-        return np.zeros_like(cleared_img)
+        raise Exception("Detection of this feature is not supported.")
+    return ndi.binary_fill_holes(binarized)
+
 
 def segment_core(fits_path, image_path=None, output_path=None, feature="penumbrae", findroi_kwargs=None, kmeans_kwargs=None, clearbg_kwargs=None):
     # check if file exists
@@ -305,11 +323,11 @@ def segment_core(fits_path, image_path=None, output_path=None, feature="penumbra
 
     # set default keyword args for find_roi, kmeans, and clear_bg
     if not findroi_kwargs:
-        findroi_kwargs = {"num_stdevs": 7, "padding": 50}
+        findroi_kwargs = {"num_stdevs": 7, "padding": 50, "min_count": 4}
     if not kmeans_kwargs:
         kmeans_kwargs = {"K": 5, "blur_strength": 1}
     if not clearbg_kwargs:
-        clearbg_kwargs = {"bwidth": 10, "bg_min_count": 50}
+        clearbg_kwargs = {"bwidth": 20}
 
     # read fits image and preprocess
     fits_image = open_fits_image(fits_path, 0)
@@ -334,7 +352,7 @@ def segment_core(fits_path, image_path=None, output_path=None, feature="penumbra
         binarized = binarize_features(cleared, feature=feature)
         segmentation[loc] = binarized
 
-    segmentation = postprocess(segmentation)
+    # segmentation = postprocess(segmentation)
 
     # label image
     label_image = ski.measure.label(segmentation)
@@ -398,15 +416,14 @@ def segment_core(fits_path, image_path=None, output_path=None, feature="penumbra
     # os.remove(base_image_path)
 
     return (
-        f"Found {label_image.max()} {feature} in {num_regions} regions of interest.\n" + 
+        f"Found {label_image.max()} sunspot {feature} in {num_regions} regions of interest.\n" + 
+        f"Labeled image saved as {label_img_path}\n" + 
         f"Region properties saved as {regionprop_path}\n" + 
         f"Segmented image saved as {seg_img_path}\n" + 
-        f"Labeled image saved as {label_img_path}\n" + 
         "Done!\n"
     )
 
 
-
 if __name__ == '__main__':
-    run = segment_core("test_res/hmi.in_45s.20150508_230000_TAI.2.continuum.fits", feature='penumbrae')
+    run = segment_core("test_res/hmi.in_45s.20150508_000000_TAI.2.continuum.fits", feature='penumbrae')
     print(run)
