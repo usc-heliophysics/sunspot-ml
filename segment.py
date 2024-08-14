@@ -62,19 +62,19 @@ def preprocess(image):
 
 
 # currently unused.
-# def postprocess(binary_image):
-#     """
-#     remove small objects and fill holes in binary segmentation image. 
-#     """
-#     processed_img = binary_image.copy()
-#     # structure = np.ones((2, 2))
-#     structure = np.array([[0, 1, 0],
-#                           [1, 1, 1],
-#                           [0, 1, 0]])
-#     opened = ndi.binary_opening(processed_img, structure=structure)
-#     closed = ndi.binary_closing(opened, structure=structure)
-#     filled = ndi.binary_fill_holes(closed)
-#     return filled
+def postprocess(binary_image):
+    """
+    remove small objects and fill holes in binary segmentation image. 
+    """
+    processed_img = binary_image.copy()
+    # structure = np.ones((2, 2))
+    structure = np.array([[0, 1, 0],
+                          [1, 1, 1],
+                          [0, 1, 0]])
+    opened = ndi.binary_opening(processed_img, structure=structure)
+    closed = ndi.binary_closing(opened, structure=structure)
+    filled = ndi.binary_fill_holes(closed)
+    return filled
 
 
 def find_rois(image, num_stdevs=7, padding=50, min_count=4):
